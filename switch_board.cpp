@@ -5,11 +5,14 @@
 #include <qt_windows.h>
 #include <QTimer>
 #include <QDateTime>
+#include <QToolTip>
+#include <QTimer>
 
 int timerId;
 unsigned char dddate[30] = {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x08};
 unsigned int txLength;
 unsigned char BTS7008Flag = 0;
+quint64 elapsedTimerStart;
 
 Switch_Board::Switch_Board(QWidget *parent)
     : QMainWindow(parent)
@@ -17,9 +20,91 @@ Switch_Board::Switch_Board(QWidget *parent)
 {
     ui->setupUi(this);
 
+    // 颜色数组
+    QColor colors[4] = {
+        Qt::blue,    // 曲线1
+        Qt::red,     // 曲线2
+        Qt::green,   // 曲线3
+        Qt::magenta  // 曲线4
+    };
+
+    QString seriesNames[4] = {
+        "TAS 电流(mA)",
+        "曲线2",
+        "曲线3",
+        "曲线4"
+    };
+
+    // 创建图表
+    chart = new QChart();
+    chart->setTitle("实时曲线");
+    chart->setAnimationOptions(QChart::SeriesAnimations);
+
+    // 创建4条曲线
+    for (int i = 0; i < 4; i++) {
+        series[i] = new QSplineSeries();
+        series[i]->setName(seriesNames[i]);
+
+        QPen pen;
+        pen.setColor(colors[i]);
+        pen.setWidth(2);
+        series[i]->setPen(pen);
+
+        chart->addSeries(series[i]);
+
+        // 连接鼠标悬停信号
+        connect(series[i], &QXYSeries::hovered, this, &Switch_Board::tooltipPoint);
+        //鼠标离开时隐藏提示
+        connect(series[i], &QXYSeries::clicked, this, []() { QToolTip::hideText(); });
+    }
+
+    // X 轴（时间）
+    axisX = new QValueAxis();
+    axisX->setRange(0, 20000);
+    axisX->setTitleText("时间 (ms)");
+    chart->addAxis(axisX, Qt::AlignmentFlag::AlignBottom);
+
+    // Y 轴（值）
+    axisY = new QValueAxis();
+    axisY->setRange(0, 200);
+    // axisY->setTitleText("A");
+    chart->addAxis(axisY, Qt::AlignmentFlag::AlignLeft);
+
+    // 将每条曲线附加到坐标轴
+    for (int i = 0; i < 4; i++) {
+        series[i]->attachAxis(axisX);
+        series[i]->attachAxis(axisY);
+    }
+
+    // 创建视图
+    chartView = new QChartView(chart);
+    chartView->setRenderHint(QPainter::Antialiasing);
+    chartView->setRubberBand(QChartView::RectangleRubberBand);  // 矩形选区缩放
+    chartView->setInteractive(true);  // 确保可交互
+
+    QVBoxLayout *chartLayout = new QVBoxLayout(ui->widget);
+    ui->widget->setLayout(chartLayout);
+    QVBoxLayout *layout = qobject_cast<QVBoxLayout*>(ui->widget->layout());  // 获取布局
+    layout->addWidget(chartView);  // 添加 chartView 到布局（占用全部空间）
+
+    // 数据存储：每条曲线都有自己的数据点
+    for (int i = 0; i < 4; i++) {
+        dataPointsList.append(QVector<QPointF>());
+        dataPointsList[i].reserve(5000);
+    }
+    // dataPoints.reserve(5000);
+    elapsedTimer.start();
+    timerChart = new QTimer(this);
+    timerChart->setInterval(300);
+    connect(timerChart, &QTimer::timeout, this, &Switch_Board::onTimeChart);
+    timerChart->start();
+
+
+
+
     app_libusbTh = new app_libusb();
 
-    connect(app_libusbTh, SIGNAL(libusbSignal(QString)), this, SLOT(rexda(QString)));
+    connect(app_libusbTh, app_libusb::libusbSignal, this, Switch_Board::rexda);
 
     (void)libusb_init(NULL);
 
@@ -28,17 +113,40 @@ Switch_Board::Switch_Board(QWidget *parent)
 
 Switch_Board::~Switch_Board()
 {
-    delete ui;
+    if (timerChart->isActive())
+    {
+        timerChart->stop();
+    }
+
     app_libusbTh->stop();
     app_libusbTh->quit();
     (void)app_libusbTh->wait();
     delete app_libusbTh;
+
+    delete ui;
 }
 
-void Switch_Board::rexda(QString s)
-{
+
+void Switch_Board::rexda(unsigned char* data, int length)
+{    
+    QString s;
+
+    for (int i = 0; i < length; i++)
+    {
+        s.append(QString("%1").arg(data[i], 2, 16, QChar('0')).toUpper() + " ");
+    }
     ui->textEdit->append("Rx: " + s);
+
+    if ((0x5a == data[0]) && (0x5a == data[1]))
+    {
+        // qDebug() << 3.621 * ((0x0f & data[9]) << 8 | (data[8] > 0x3c ? (data[8] - 0x3c) : 0));
+        updateData((3.621 * ((0x0f & data[3]) << 8 | (data[2] > 0x3c ? (data[2] - 0x3c) : 0))),
+                   (3.621 * ((0x0f & data[5]) << 8 | (data[4] > 0x3c ? (data[4] - 0x3c) : 0))),
+                   (3.621 * ((0x0f & data[7]) << 8 | (data[6] > 0x3c ? (data[6] - 0x3c) : 0))),
+                   (3.621 * ((0x0f & data[9]) << 8 | (data[8] > 0x3c ? (data[8] - 0x3c) : 0))));
+    }
 }
+
 
 void thisCB(uint uTimerID, uint uMsg, HANDLE_PTR dwUser, HANDLE_PTR dw1, HANDLE_PTR dw2)
 {   
@@ -414,6 +522,75 @@ void Switch_Board::on_pushButton_POWER_OFF_clicked()
     unsigned char* data = (unsigned char*)datas.data();
 
     app_libusbTh->libusb_Tx(data, dataLength);
+}
+
+
+void Switch_Board::tooltipPoint(const QPointF &point)
+{
+    // 显示精确数值（X: 时间, Y: 值）
+    QToolTip::showText(QCursor::pos(), QString("%3 mA").arg(point.y(), 0, 'f', 3), this);
+}
+
+
+void Switch_Board::updateData(double newValue1, double newValue2, double newValue3, double newValue4)
+{
+    qint64 currentTime = elapsedTimer.elapsed();
+
+    // 更新每条曲线的数据
+    dataPointsList[0].append(QPointF(currentTime, newValue1));
+    dataPointsList[1].append(QPointF(currentTime, newValue2));
+    dataPointsList[2].append(QPointF(currentTime, newValue3));
+    dataPointsList[3].append(QPointF(currentTime, newValue4));
+
+    // 保持最近 5000 个点
+    for (int i = 0; i < 4; i++) {
+        if (dataPointsList[i].size() > 5000) {
+            dataPointsList[i].removeFirst();
+        }
+    }
+
+    // ui->label_4->setText(QString::number(elapsedTimer.elapsed() - elapsedTimerStart) + " ms");
+    elapsedTimerStart = currentTime;
+}
+
+
+void Switch_Board::onTimeChart()
+{
+    // 更新每条曲线
+    for (int i = 0; i < 4; i++) {
+        series[i]->clear();
+        for (const auto& point : dataPointsList[i]) {
+            series[i]->append(point);
+        }
+    }
+
+    qint64 time = elapsedTimer.elapsed();
+    // qDebug() <<time;
+    // 更新轴范围（滚动显示最近 10 秒）
+    if (time > 1000 * 20) {
+        axisX->setRange((time - 1000 * 20), time);
+    }
+    // axisY->setRange(0, 2);  // Y 轴固定，可动态调整
+    // 自动调整Y轴范围
+    double minY = 0;
+    double maxY = 200;
+
+    // 找到所有曲线中的最小值和最大值
+    for (const auto& points : dataPointsList) {
+        for (const auto& point : points) {
+            if (point.y() < minY) minY = point.y();
+            if (point.y() > maxY) maxY = point.y();
+        }
+    }
+
+    // 给Y轴留一些边距
+    double margin = (maxY - minY) * 0.1;
+    axisY->setRange(minY - margin, maxY + margin);
+
+    // if (50000 < ui->textEdit->document()->blockCount())
+    // {
+    //     ui->textEdit->clear();
+    // }
 }
 
 

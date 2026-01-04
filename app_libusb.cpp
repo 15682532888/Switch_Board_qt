@@ -69,15 +69,23 @@ void app_libusb::run(void)
 
         if (!rxData.isEmpty())
         {
-            unsigned char* tempDate = rxData.dequeue();
-            QString s;
+            // unsigned char* tempDate = rxData.dequeue();
 
-            for (int i = 0; i < 10; i++)
-            {
-                s.append(QString("%1").arg(tempDate[i], 2, 16, QChar('0')).toUpper() + " ");
-            }
+            // if ((0x5a == tempDate[0]) && (0x5a == tempDate[1]))
+            // {
+            //     // 创建 QByteArray 的深拷贝
+            //     QByteArray dataArray(reinterpret_cast<char*>(tempDate), 10);
+            //     emit libusbDataSignal(dataArray);
+            // }
 
-            emit libusbSignal(s);
+            // QString s;
+
+            // for (int i = 0; i < 10; i++)
+            // {
+            //     s.append(QString("%1").arg(tempDate[i], 2, 16, QChar('0')).toUpper() + " ");
+            // }
+
+            emit libusbSignal(rxData.dequeue(), 10);
         }
     }
 }

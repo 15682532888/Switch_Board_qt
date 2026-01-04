@@ -21,7 +21,7 @@ public:
     void libusb_Tx(unsigned char *data, int length);
 
 signals:
-    void libusbSignal(QString);
+    void libusbSignal(unsigned char* data, int length);
 
 private:
     bool usbThreadIsRun = false;
