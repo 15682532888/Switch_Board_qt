@@ -78,7 +78,7 @@ Switch_Board::Switch_Board(QWidget *parent)
 
     // 创建视图
     chartView = new QChartView(chart);
-    chartView->setRenderHint(QPainter::Antialiasing);
+    // chartView->setRenderHint(QPainter::Antialiasing); // 注释后更优？
     chartView->setRubberBand(QChartView::RectangleRubberBand);  // 矩形选区缩放
     chartView->setInteractive(true);  // 确保可交互
 
@@ -99,7 +99,7 @@ Switch_Board::Switch_Board(QWidget *parent)
     connect(timerChart, &QTimer::timeout, this, &Switch_Board::onTimeChart);
     timerChart->start();
 
-
+ui->textEdit->document()->setMaximumBlockCount(50000); // 只保留最近500行数据
 
 
     app_libusbTh = new app_libusb();
@@ -128,7 +128,7 @@ Switch_Board::~Switch_Board()
 
 
 void Switch_Board::rexda(unsigned char* data, int length)
-{    
+{
     QString s;
 
     for (int i = 0; i < length; i++)
@@ -149,7 +149,7 @@ void Switch_Board::rexda(unsigned char* data, int length)
 
 
 void thisCB(uint uTimerID, uint uMsg, HANDLE_PTR dwUser, HANDLE_PTR dw1, HANDLE_PTR dw2)
-{   
+{
 
 }
 
@@ -556,41 +556,31 @@ void Switch_Board::updateData(double newValue1, double newValue2, double newValu
 
 void Switch_Board::onTimeChart()
 {
-    // 更新每条曲线
+    // 1. 批量替换数据，大幅减少重绘次数
     for (int i = 0; i < 4; i++) {
-        series[i]->clear();
-        for (const auto& point : dataPointsList[i]) {
-            series[i]->append(point);
-        }
+        series[i]->replace(dataPointsList[i]);
     }
 
     qint64 time = elapsedTimer.elapsed();
-    // qDebug() <<time;
-    // 更新轴范围（滚动显示最近 10 秒）
-    if (time > 1000 * 20) {
-        axisX->setRange((time - 1000 * 20), time);
+
+    // 2. 只有当时间超过范围时才更新 X 轴
+    if (time > 20000) {
+        axisX->setRange(time - 20000, time);
     }
-    // axisY->setRange(0, 2);  // Y 轴固定，可动态调整
-    // 自动调整Y轴范围
+
+    // 3. 优化 Y 轴自动缩放逻辑
+    // 只有在必要时才遍历 20000 个点，或者限制遍历频率
     double minY = 0;
     double maxY = 200;
-
-    // 找到所有曲线中的最小值和最大值
     for (const auto& points : dataPointsList) {
+        if (points.isEmpty()) continue;
         for (const auto& point : points) {
             if (point.y() < minY) minY = point.y();
             if (point.y() > maxY) maxY = point.y();
         }
     }
-
-    // 给Y轴留一些边距
     double margin = (maxY - minY) * 0.1;
     axisY->setRange(minY - margin, maxY + margin);
-
-    // if (50000 < ui->textEdit->document()->blockCount())
-    // {
-    //     ui->textEdit->clear();
-    // }
 }
 
 
