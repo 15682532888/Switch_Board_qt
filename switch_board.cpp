@@ -1,5 +1,5 @@
 #include "switch_board.h"
-#include "./ui_switch_board.h"
+#include "ui_switch_board.h"
 #include <QProcess>
 #include <qfiledialog.h>
 #include <qt_windows.h>
@@ -38,11 +38,12 @@ Switch_Board::Switch_Board(QWidget *parent)
     // 创建图表
     chart = new QChart();
     chart->setTitle("实时曲线");
-    chart->setAnimationOptions(QChart::SeriesAnimations);
+    chart->setAnimationOptions(QChart::NoAnimation);
 
     // 创建4条曲线
     for (int i = 0; i < 4; i++) {
-        series[i] = new QSplineSeries();
+        series[i] = new QLineSeries();
+        series[i]->setUseOpenGL(true);
         series[i]->setName(seriesNames[i]);
 
         QPen pen;
@@ -78,7 +79,7 @@ Switch_Board::Switch_Board(QWidget *parent)
 
     // 创建视图
     chartView = new QChartView(chart);
-    // chartView->setRenderHint(QPainter::Antialiasing); // 注释后更优？
+    chartView->setRenderHint(QPainter::Antialiasing, false);  // 追求性能，不使用抗锯齿
     chartView->setRubberBand(QChartView::RectangleRubberBand);  // 矩形选区缩放
     chartView->setInteractive(true);  // 确保可交互
 
@@ -537,10 +538,10 @@ void Switch_Board::updateData(double newValue1, double newValue2, double newValu
     qint64 currentTime = elapsedTimer.elapsed();
 
     // 更新每条曲线的数据
-    dataPointsList[0].append(QPointF(currentTime, newValue1));
-    dataPointsList[1].append(QPointF(currentTime, newValue2));
-    dataPointsList[2].append(QPointF(currentTime, newValue3));
-    dataPointsList[3].append(QPointF(currentTime, newValue4));
+    dataPointsList[0].append(QPointF(currentTime, newValue1+1.1));
+    dataPointsList[1].append(QPointF(currentTime, newValue2+2.1));
+    dataPointsList[2].append(QPointF(currentTime, newValue3+3.1));
+    dataPointsList[3].append(QPointF(currentTime, newValue4+4.1));
 
     // 保持最近 5000 个点
     for (int i = 0; i < 4; i++) {
@@ -556,15 +557,18 @@ void Switch_Board::updateData(double newValue1, double newValue2, double newValu
 
 void Switch_Board::onTimeChart()
 {
-    // 1. 批量替换数据，大幅减少重绘次数
+    // 批量替换数据，避免 clear() 带来的白屏瞬间
     for (int i = 0; i < 4; i++) {
-        series[i]->replace(dataPointsList[i]);
+        if (dataPointsList[i].size() > 0) {
+            series[i]->replace(dataPointsList[i]);
+        }
     }
 
     qint64 time = elapsedTimer.elapsed();
 
-    // 2. 只有当时间超过范围时才更新 X 轴
+    // 只有当时间轴超出范围时才平滑移动窗口
     if (time > 20000) {
+        // 使用这种方式会让坐标轴随时间平滑向右平移
         axisX->setRange(time - 20000, time);
     }
 

@@ -8,6 +8,7 @@
 #include <QtCharts/QValueAxis>
 #include <QPen>
 #include <QVector>
+#include <QElapsedTimer>
 #include "app_libusb.h"
 
 QT_BEGIN_NAMESPACE
@@ -72,7 +73,7 @@ private:
     app_libusb* app_libusbTh;
     void setButtonColor(QPushButton* btn, bool active);
 
-    QSplineSeries *series[4];
+    QLineSeries *series[4]; //QLineSeries 更优？
     QChart *chart;
     QChartView *chartView;
     QValueAxis *axisX;

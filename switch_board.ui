@@ -13,9 +13,6 @@
   <property name="windowTitle">
    <string>Switch_Board</string>
   </property>
-  <property name="toolTip">
-   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;ertyuikl&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-  </property>
   <widget class="QWidget" name="centralwidget">
    <widget class="QLabel" name="label">
     <property name="geometry">
