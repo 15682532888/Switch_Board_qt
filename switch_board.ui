@@ -345,6 +345,102 @@
      </rect>
     </property>
    </widget>
+   <widget class="QPushButton" name="pushButton_WDG_3">
+    <property name="geometry">
+     <rect>
+      <x>180</x>
+      <y>290</y>
+      <width>131</width>
+      <height>29</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #BDC3C7; color: black; border-radius: 4px;</string>
+    </property>
+    <property name="text">
+     <string>WDG 3</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pushButton_WDG_2">
+    <property name="geometry">
+     <rect>
+      <x>40</x>
+      <y>290</y>
+      <width>131</width>
+      <height>29</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #BDC3C7; color: black; border-radius: 4px;</string>
+    </property>
+    <property name="text">
+     <string>WDG 2 D-T22</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pushButton_WDG_0">
+    <property name="geometry">
+     <rect>
+      <x>40</x>
+      <y>250</y>
+      <width>131</width>
+      <height>29</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #BDC3C7; color: black; border-radius: 4px;</string>
+    </property>
+    <property name="text">
+     <string>WDG 0 ZCUP</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pushButton_WDG_1">
+    <property name="geometry">
+     <rect>
+      <x>180</x>
+      <y>250</y>
+      <width>131</width>
+      <height>29</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #BDC3C7; color: black; border-radius: 4px;</string>
+    </property>
+    <property name="text">
+     <string>WDG 1</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pushButton_WDG_ON">
+    <property name="geometry">
+     <rect>
+      <x>320</x>
+      <y>290</y>
+      <width>131</width>
+      <height>29</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #BDC3C7; color: black; border-radius: 4px;</string>
+    </property>
+    <property name="text">
+     <string>WDG ON</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pushButton_WDG_OFF">
+    <property name="geometry">
+     <rect>
+      <x>460</x>
+      <y>290</y>
+      <width>131</width>
+      <height>29</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #BDC3C7; color: black; border-radius: 4px;</string>
+    </property>
+    <property name="text">
+     <string>WDG OFF</string>
+    </property>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
@@ -352,7 +448,7 @@
      <x>0</x>
      <y>0</y>
      <width>1093</width>
-     <height>22</height>
+     <height>26</height>
     </rect>
    </property>
   </widget>

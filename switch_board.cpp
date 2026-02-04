@@ -12,6 +12,7 @@ int timerId;
 unsigned char dddate[30] = {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x08};
 unsigned int txLength;
 unsigned char BTS7008Flag = 0;
+unsigned char HCT4066DFlag = 0;
 quint64 elapsedTimerStart;
 
 Switch_Board::Switch_Board(QWidget *parent)
@@ -596,5 +597,177 @@ void Switch_Board::setButtonColor(QPushButton* btn, bool active) {
         // 灰色代表关闭
         btn->setStyleSheet("background-color: #BDC3C7; color: black; border-radius: 4px;");
     }
+}
+
+
+void Switch_Board::on_pushButton_WDG_OFF_clicked()
+{
+    QByteArray datas;
+    datas.resize(3);
+
+    datas[0] = static_cast<unsigned char>(0xC2);
+    datas[1] = static_cast<unsigned char>(0x00);
+    datas[2] = static_cast<unsigned char>(0xff);
+    HCT4066DFlag = 0;
+
+    setButtonColor(ui->pushButton_WDG_0, false);
+    setButtonColor(ui->pushButton_WDG_1, false);
+    setButtonColor(ui->pushButton_WDG_2, false);
+    setButtonColor(ui->pushButton_WDG_3, false);
+
+    int dataLength = datas.length();
+    unsigned char* data = (unsigned char*)datas.data();
+
+    app_libusbTh->libusb_Tx(data, dataLength);
+}
+
+
+void Switch_Board::on_pushButton_WDG_ON_clicked()
+{
+    QByteArray datas;
+    datas.resize(3);
+
+    datas[0] = static_cast<unsigned char>(0xC2);
+    datas[1] = static_cast<unsigned char>(0x01);
+    datas[2] = static_cast<unsigned char>(0xff);
+    HCT4066DFlag = 0b1111;
+
+    setButtonColor(ui->pushButton_WDG_0, true);
+    setButtonColor(ui->pushButton_WDG_1, true);
+    setButtonColor(ui->pushButton_WDG_2, true);
+    setButtonColor(ui->pushButton_WDG_3, true);
+
+    int dataLength = datas.length();
+    unsigned char* data = (unsigned char*)datas.data();
+
+    app_libusbTh->libusb_Tx(data, dataLength);
+}
+
+
+void Switch_Board::on_pushButton_WDG_0_clicked()
+{
+    bool flag;
+    QByteArray datas;
+    datas.resize(3);
+
+    datas[0] = static_cast<unsigned char>(0xC2);
+
+    if (0b1 & HCT4066DFlag)
+    {
+        HCT4066DFlag &= 0b11111110;
+        datas[1] = static_cast<unsigned char>(0x00);
+        flag = false;
+    }
+    else
+    {
+        HCT4066DFlag |= 0b1;
+        datas[1] = static_cast<unsigned char>(0x01);
+        flag = true;
+    }
+
+    datas[2] = static_cast<unsigned char>(0x02);
+
+    setButtonColor(ui->pushButton_WDG_0, flag);
+
+    int dataLength = datas.length();
+    unsigned char* data = (unsigned char*)datas.data();
+
+    app_libusbTh->libusb_Tx(data, dataLength);
+}
+
+
+void Switch_Board::on_pushButton_WDG_1_clicked()
+{
+    bool flag;
+    QByteArray datas;
+    datas.resize(3);
+
+    datas[0] = static_cast<unsigned char>(0xC2);
+
+    if (0b10 & HCT4066DFlag)
+    {
+        HCT4066DFlag &= 0b11111101;
+        datas[1] = static_cast<unsigned char>(0x00);
+        flag = false;
+    }
+    else
+    {
+        HCT4066DFlag |= 0b10;
+        datas[1] = static_cast<unsigned char>(0x01);
+        flag = true;
+    }
+
+    datas[2] = static_cast<unsigned char>(0x03);
+
+    setButtonColor(ui->pushButton_WDG_1, flag);
+
+    int dataLength = datas.length();
+    unsigned char* data = (unsigned char*)datas.data();
+
+    app_libusbTh->libusb_Tx(data, dataLength);
+}
+
+
+void Switch_Board::on_pushButton_WDG_2_clicked()
+{
+    bool flag;
+    QByteArray datas;
+    datas.resize(3);
+
+    datas[0] = static_cast<unsigned char>(0xC2);
+
+    if (0b100 & HCT4066DFlag)
+    {
+        HCT4066DFlag &= 0b11111011;
+        datas[1] = static_cast<unsigned char>(0x00);
+        flag = false;
+    }
+    else
+    {
+        HCT4066DFlag |= 0b100;
+        datas[1] = static_cast<unsigned char>(0x01);
+        flag = true;
+    }
+
+    datas[2] = static_cast<unsigned char>(0x01);
+
+    setButtonColor(ui->pushButton_WDG_2, flag);
+
+    int dataLength = datas.length();
+    unsigned char* data = (unsigned char*)datas.data();
+
+    app_libusbTh->libusb_Tx(data, dataLength);
+}
+
+
+void Switch_Board::on_pushButton_WDG_3_clicked()
+{
+    bool flag;
+    QByteArray datas;
+    datas.resize(3);
+
+    datas[0] = static_cast<unsigned char>(0xC2);
+
+    if (0b1000 & HCT4066DFlag)
+    {
+        HCT4066DFlag &= 0b11110111;
+        datas[1] = static_cast<unsigned char>(0x00);
+        flag = false;
+    }
+    else
+    {
+        HCT4066DFlag |= 0b1000;
+        datas[1] = static_cast<unsigned char>(0x01);
+        flag = true;
+    }
+
+    datas[2] = static_cast<unsigned char>(0x00);
+
+    setButtonColor(ui->pushButton_WDG_3, flag);
+
+    int dataLength = datas.length();
+    unsigned char* data = (unsigned char*)datas.data();
+
+    app_libusbTh->libusb_Tx(data, dataLength);
 }
 

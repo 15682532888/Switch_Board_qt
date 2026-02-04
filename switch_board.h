@@ -68,6 +68,18 @@ private slots:
 
     void onTimeChart();
 
+    void on_pushButton_WDG_OFF_clicked();
+
+    void on_pushButton_WDG_ON_clicked();
+
+    void on_pushButton_WDG_0_clicked();
+
+    void on_pushButton_WDG_1_clicked();
+
+    void on_pushButton_WDG_2_clicked();
+
+    void on_pushButton_WDG_3_clicked();
+
 private:
     Ui::Switch_Board *ui;
     app_libusb* app_libusbTh;
