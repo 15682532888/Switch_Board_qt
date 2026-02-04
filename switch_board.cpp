@@ -1,12 +1,12 @@
 #include "switch_board.h"
 #include "ui_switch_board.h"
 #include <QProcess>
-#include <qfiledialog.h>
+#include <QFileDialog>
 #include <qt_windows.h>
 #include <QTimer>
 #include <QDateTime>
 #include <QToolTip>
-#include <QTimer>
+#include "qcustomplot.h"
 
 int timerId;
 unsigned char dddate[30] = {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x08};
@@ -20,6 +20,8 @@ Switch_Board::Switch_Board(QWidget *parent)
     , ui(new Ui::Switch_Board)
 {
     ui->setupUi(this);
+	
+	customPlot = new QCustomPlot(this);
 
     // 颜色数组
     QColor colors[4] = {
@@ -36,66 +38,44 @@ Switch_Board::Switch_Board(QWidget *parent)
         "曲线4"
     };
 
-    // 创建图表
-    chart = new QChart();
-    chart->setTitle("实时曲线");
-    chart->setAnimationOptions(QChart::NoAnimation);
-
-    // 创建4条曲线
-    for (int i = 0; i < 4; i++) {
-        series[i] = new QLineSeries();
-        series[i]->setUseOpenGL(true);
-        series[i]->setName(seriesNames[i]);
-
-        QPen pen;
-        pen.setColor(colors[i]);
-        pen.setWidth(2);
-        series[i]->setPen(pen);
-
-        chart->addSeries(series[i]);
-
-        // 连接鼠标悬停信号
-        connect(series[i], &QXYSeries::hovered, this, &Switch_Board::tooltipPoint);
-        //鼠标离开时隐藏提示
-        connect(series[i], &QXYSeries::clicked, this, []() { QToolTip::hideText(); });
+    // 建立 4 條曲線
+    for (int i = 0; i < 4; ++i) {
+        graph[i] = customPlot->addGraph();
+        graph[i]->setName(seriesNames[i]);
+        graph[i]->setPen(QPen(colors[i], 2));
+        graph[i]->setAntialiased(true);
+        graphDataContainers[i] = QSharedPointer<QCPGraphDataContainer>(new QCPGraphDataContainer);
+        graph[i]->setData(graphDataContainers[i]);
+        // 可選擇是否顯示散點：graph[i]->setScatterStyle(QCPScatterStyle::ssCircle);
     }
 
-    // X 轴（时间）
-    axisX = new QValueAxis();
-    axisX->setRange(0, 20000);
-    axisX->setTitleText("时间 (ms)");
-    chart->addAxis(axisX, Qt::AlignmentFlag::AlignBottom);
+    // X 軸設定（時間 ms）
+    customPlot->xAxis->setLabel("时间 (ms)");
+    customPlot->xAxis->setRange(0, 20000);
 
-    // Y 轴（值）
-    axisY = new QValueAxis();
-    axisY->setRange(0, 200);
-    // axisY->setTitleText("A");
-    chart->addAxis(axisY, Qt::AlignmentFlag::AlignLeft);
+    // Y 軸設定（電流 mA）
+    customPlot->yAxis->setLabel("电流 (mA)");
+    customPlot->yAxis->setRange(0, 200);
 
-    // 将每条曲线附加到坐标轴
-    for (int i = 0; i < 4; i++) {
-        series[i]->attachAxis(axisX);
-        series[i]->attachAxis(axisY);
-    }
+    // 啟用互動：拖曳、縮放、選取
+    customPlot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom | QCP::iSelectPlottables);
 
-    // 创建视图
-    chartView = new QChartView(chart);
-    chartView->setRenderHint(QPainter::Antialiasing, false);  // 追求性能，不使用抗锯齿
-    chartView->setRubberBand(QChartView::RectangleRubberBand);  // 矩形选区缩放
-    chartView->setInteractive(true);  // 确保可交互
+    // 圖例顯示在右上角
+    customPlot->legend->setVisible(true);
+    customPlot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignTop | Qt::AlignRight);
 
+    // 放入 ui->widget
     QVBoxLayout *chartLayout = new QVBoxLayout(ui->widget);
     ui->widget->setLayout(chartLayout);
-    QVBoxLayout *layout = qobject_cast<QVBoxLayout*>(ui->widget->layout());  // 获取布局
-    layout->addWidget(chartView);  // 添加 chartView 到布局（占用全部空间）
+    chartLayout->addWidget(customPlot);
 
-    // 数据存储：每条曲线都有自己的数据点
-    for (int i = 0; i < 4; i++) {
-        dataPointsList.append(QVector<QPointF>());
-        dataPointsList[i].reserve(5000);
-    }
-    // dataPoints.reserve(5000);
+    // 用來追蹤 Y 軸極值（增量更新，避免每次掃描全部點）
+    minY = 0.0;
+    maxY = 200.0;
+
     elapsedTimer.start();
+
+    // 圖表刷新定時器（建議 400~600ms）
     timerChart = new QTimer(this);
     timerChart->setInterval(300);
     connect(timerChart, &QTimer::timeout, this, &Switch_Board::onTimeChart);
@@ -106,11 +86,14 @@ ui->textEdit->document()->setMaximumBlockCount(50000); // 只保留最近500行�
 
     app_libusbTh = new app_libusb();
 
-    connect(app_libusbTh, app_libusb::libusbSignal, this, Switch_Board::rexda);
+    connect(app_libusbTh, app_libusb::libusbSignal, this, &Switch_Board::rexda);
 
     (void)libusb_init(NULL);
 
     app_libusbTh->start();
+
+    // 滑鼠移動時顯示提示
+    connect(customPlot, &QCustomPlot::mouseMove, this, &Switch_Board::onMouseMoveShowTooltip);
 }
 
 Switch_Board::~Switch_Board()
@@ -139,22 +122,128 @@ void Switch_Board::rexda(unsigned char* data, int length)
     }
     ui->textEdit->append("Rx: " + s);
 
-    if ((0x5a == data[0]) && (0x5a == data[1]))
+    if (length >= 10 && (0x5a == data[0]) && (0x5a == data[1]))
     {
-        // qDebug() << 3.621 * ((0x0f & data[9]) << 8 | (data[8] > 0x3c ? (data[8] - 0x3c) : 0));
-        updateData((3.621 * ((0x0f & data[3]) << 8 | (data[2] > 0x3c ? (data[2] - 0x3c) : 0))),
-                   (3.621 * ((0x0f & data[5]) << 8 | (data[4] > 0x3c ? (data[4] - 0x3c) : 0))),
-                   (3.621 * ((0x0f & data[7]) << 8 | (data[6] > 0x3c ? (data[6] - 0x3c) : 0))),
-                   (3.621 * ((0x0f & data[9]) << 8 | (data[8] > 0x3c ? (data[8] - 0x3c) : 0))));
+        double v1 = 3.621 * (((0x0f & data[3]) << 8) | (data[2] > 0x3c ? (data[2] - 0x3c) : 0));
+        double v2 = 3.621 * (((0x0f & data[5]) << 8) | (data[4] > 0x3c ? (data[4] - 0x3c) : 0));
+        double v3 = 3.621 * (((0x0f & data[7]) << 8) | (data[6] > 0x3c ? (data[6] - 0x3c) : 0));
+        double v4 = 3.621 * (((0x0f & data[9]) << 8) | (data[8] > 0x3c ? (data[8] - 0x3c) : 0));
+
+        updateData(v1, v2, v3, v4);
     }
 }
-
 
 void thisCB(uint uTimerID, uint uMsg, HANDLE_PTR dwUser, HANDLE_PTR dw1, HANDLE_PTR dw2)
 {
 
 }
 
+void Switch_Board::updateData(double newValue1, double newValue2, double newValue3, double newValue4)
+{
+    qint64 currentTime = elapsedTimer.elapsed();
+
+    double values[4] = {newValue1 + 1.1, newValue2 + 2.1, newValue3 + 3.1, newValue4 + 4.1};
+
+    constexpr int MAX_POINTS = 2500;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        // 加入新資料點（key = time, value = y）
+        graphDataContainers[i]->add(QCPGraphData(currentTime, values[i]));
+
+        // 更新極值
+        if (values[i] < minY) minY = values[i];
+        if (values[i] > maxY) maxY = values[i];
+
+        // 移除過舊的點（保持最多 MAX_POINTS 個）
+        while (graphDataContainers[i]->size() > MAX_POINTS)
+        {
+            // 移除最小的 key（最舊的）
+            graphDataContainers[i]->remove(graphDataContainers[i]->begin()->key);
+        }
+    }
+}
+
+void Switch_Board::onTimeChart()
+{
+    qint64 now = elapsedTimer.elapsed();
+
+    // X 軸滑動
+    if (now > 20000)
+    {
+        customPlot->xAxis->setRange(now - 20000, now);
+    }
+
+    // Y 軸自動範圍
+    double margin = (maxY - minY) * 0.12;
+    if (margin < 5.0) margin = 5.0;
+    customPlot->yAxis->setRange(minY - margin, maxY + margin);
+
+    customPlot->replot(QCustomPlot::rpQueuedReplot);
+}
+
+void Switch_Board::onMouseMoveShowTooltip(QMouseEvent *event)
+{
+    QString tip;
+    double mouseKey = customPlot->xAxis->pixelToCoord(event->pos().x());
+
+    for (int i = 0; i < 4; ++i)
+    {
+        // 先檢查是否靠近曲線（距離 < 20 像素）
+        if (graph[i]->selectTest(event->pos(), false) < 20)
+        {
+            // 找到最接近 mouseKey 的資料迭代器
+            auto it = graph[i]->data()->findBegin(mouseKey);
+
+            double closestKey = 0;
+            double closestValue = 0;
+
+            // 比較前後兩個點，選最近的
+            if (it != graph[i]->data()->constEnd())
+            {
+                closestKey = it->key;
+                closestValue = it->value;
+
+                // 如果不是第一個點，比較前一個
+                if (it != graph[i]->data()->constBegin())
+                {
+                    auto prev = it - 1;
+                    double distPrev = qAbs(prev->key - mouseKey);
+                    double distCurr = qAbs(closestKey - mouseKey);
+
+                    if (distPrev < distCurr)
+                    {
+                        closestKey = prev->key;
+                        closestValue = prev->value;
+                    }
+                }
+
+                tip += QString("%1: %2 mA (at %3 ms)\n")
+                           .arg(graph[i]->name())
+                           .arg(closestValue, 0, 'f', 3)
+                           .arg(closestKey, 0, 'f', 0);
+            }
+        }
+    }
+
+    if (!tip.isEmpty())
+    {
+        QToolTip::showText(event->globalPos(), tip.trimmed(), this);
+    }
+    else
+    {
+        QToolTip::hideText();
+    }
+}
+
+void Switch_Board::setButtonColor(QPushButton* btn, bool active)
+{
+    if (active) {
+        btn->setStyleSheet("background-color: #2ECC71; color: white; border-radius: 4px;");
+    } else {
+        btn->setStyleSheet("background-color: #BDC3C7; color: black; border-radius: 4px;");
+    }
+}
 
 void Switch_Board::on_pushButton_OpenDevice_clicked()
 {
@@ -163,44 +252,34 @@ void Switch_Board::on_pushButton_OpenDevice_clicked()
 
 void Switch_Board::on_pushButton_Exit_clicked()
 {
-    QApplication* app;
-
-    app->quit();
+    QApplication::quit();
 }
-
 
 void Switch_Board::on_pushButton_Clear_clicked()
 {
     ui->textEdit->clear();
 }
 
-
 void Switch_Board::on_pushButton_Save_clicked()
 {
-    if (ui->textEdit->toPlainText() != "")
-    {
-        //???
-        QFileDialog fileDialog;
-        QString str = fileDialog.getSaveFileName(this, tr("Save File"), QCoreApplication::applicationDirPath(), tr("Text File(*.txt)"));
+    if (ui->textEdit->toPlainText().isEmpty())
+        return;
 
-        if (str == "")
-        {
-            return;
-        }
+    QString str = QFileDialog::getSaveFileName(this, tr("Save File"),
+                                               QCoreApplication::applicationDirPath(),
+                                               tr("Text File(*.txt)"));
+    if (str.isEmpty())
+        return;
 
-        QFile filename(str);
-        if (!filename.open(QIODevice::WriteOnly | QIODevice::Text))
-        {
-            return;
-        }
+    QFile file(str);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+        return;
 
-        QTextStream textStream(&filename);
-        QString str1 = ui->textEdit->toPlainText();
-        textStream << str1;
-        filename.close();
-
-        //????
-//        QString filePath = QDateTime::currentDateTime().toString("yyyy_MM_dd_hh_mm_ss") + ".dat";
+    QTextStream textStream(&file);
+    textStream << ui->textEdit->toPlainText();
+    file.close();
+	
+	//        QString filePath = QDateTime::currentDateTime().toString("yyyy_MM_dd_hh_mm_ss") + ".dat";
 //        QFile file(filePath);
 //        if (!file.open(QIODevice::WriteOnly))
 //        {
@@ -228,9 +307,7 @@ void Switch_Board::on_pushButton_Save_clicked()
 //        uint len;
 //        data.readBytes(rbytes, len);
 //        delete rbytes;
-    }
 }
-
 
 void Switch_Board::on_pushButton_SendCmd_clicked()
 {
@@ -239,11 +316,13 @@ void Switch_Board::on_pushButton_SendCmd_clicked()
     QByteArray datas = QByteArray::fromHex(ui->lineEdit_SendCmd->text().toUtf8());
 
     int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
+    if (dataLength == 0)
+        return;
+
+    unsigned char* data = reinterpret_cast<unsigned char*>(datas.data());
 
     app_libusbTh->libusb_Tx(data, dataLength);
 }
-
 
 void Switch_Board::on_pushButton_Find_clicked()
 {
@@ -253,9 +332,13 @@ void Switch_Board::on_pushButton_Find_clicked()
 
     QMap<QString, int> deviceName;
     int deviceCount = 1;
-    for (int deviceIndex = 0; deviceIndex < deviceNum; deviceIndex++)
+
+    for (int deviceIndex = 0; deviceIndex < deviceNum; ++deviceIndex)
     {
         ret = libusb_get_device_descriptor(devList[deviceIndex], &descriptor);
+        if (ret < 0)
+            continue;
+
         if ((0xcc44 == descriptor.idProduct) && (0xcc84 == descriptor.idVendor))
         {
             deviceName.insert(QString::number(deviceCount), deviceIndex);
@@ -264,17 +347,16 @@ void Switch_Board::on_pushButton_Find_clicked()
     }
 
     ui->comboBox_DeviceIndex->clear();
-    foreach (const QString &str, deviceName.keys()) {
-        ui->comboBox_DeviceIndex->addItem(str, deviceName.value(str));
+    for (const QString &key : deviceName.keys())
+    {
+        ui->comboBox_DeviceIndex->addItem(key, deviceName.value(key));
     }
 }
-
 
 void Switch_Board::on_pushButton_POWER_0_clicked()
 {
     bool flag;
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
 
     datas[0] = static_cast<unsigned char>(0xC0);
 
@@ -295,18 +377,13 @@ void Switch_Board::on_pushButton_POWER_0_clicked()
 
     setButtonColor(ui->pushButton_POWER_0, flag);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_POWER_1_clicked()
 {
     bool flag;
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
 
     datas[0] = static_cast<unsigned char>(0xC0);
 
@@ -327,18 +404,13 @@ void Switch_Board::on_pushButton_POWER_1_clicked()
 
     setButtonColor(ui->pushButton_POWER_1, flag);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_POWER_2_clicked()
 {
     bool flag;
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
 
     datas[0] = static_cast<unsigned char>(0xC0);
 
@@ -359,18 +431,13 @@ void Switch_Board::on_pushButton_POWER_2_clicked()
 
     setButtonColor(ui->pushButton_POWER_2, flag);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_POWER_3_clicked()
 {
     bool flag;
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
 
     datas[0] = static_cast<unsigned char>(0xC0);
 
@@ -391,106 +458,76 @@ void Switch_Board::on_pushButton_POWER_3_clicked()
 
     setButtonColor(ui->pushButton_POWER_3, flag);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_DEBUG_0_clicked()
 {
-    QString s = "C1 04";
-    QByteArray datas = QByteArray::fromHex(s.toUtf8());
+    QByteArray datas = QByteArray::fromHex("C1 04");
 
     setButtonColor(ui->pushButton_DEBUG_0, true);
     setButtonColor(ui->pushButton_DEBUG_1, false);
     setButtonColor(ui->pushButton_DEBUG_2, false);
     setButtonColor(ui->pushButton_DEBUG_3, false);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), datas.size());
 }
-
 
 void Switch_Board::on_pushButton_DEBUG_1_clicked()
 {
-    QString s = "C1 03";
-    QByteArray datas = QByteArray::fromHex(s.toUtf8());
+    QByteArray datas = QByteArray::fromHex("C1 03");
 
     setButtonColor(ui->pushButton_DEBUG_0, false);
     setButtonColor(ui->pushButton_DEBUG_1, true);
     setButtonColor(ui->pushButton_DEBUG_2, false);
     setButtonColor(ui->pushButton_DEBUG_3, false);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), datas.size());
 }
-
 
 void Switch_Board::on_pushButton_DEBUG_2_clicked()
 {
-    QString s = "C1 02";
-    QByteArray datas = QByteArray::fromHex(s.toUtf8());
+    QByteArray datas = QByteArray::fromHex("C1 02");
 
     setButtonColor(ui->pushButton_DEBUG_0, false);
     setButtonColor(ui->pushButton_DEBUG_1, false);
     setButtonColor(ui->pushButton_DEBUG_2, true);
     setButtonColor(ui->pushButton_DEBUG_3, false);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), datas.size());
 }
-
 
 void Switch_Board::on_pushButton_DEBUG_3_clicked()
 {
-    QString s = "C1 01";
-    QByteArray datas = QByteArray::fromHex(s.toUtf8());
+    QByteArray datas = QByteArray::fromHex("C1 01");
 
     setButtonColor(ui->pushButton_DEBUG_0, false);
     setButtonColor(ui->pushButton_DEBUG_1, false);
     setButtonColor(ui->pushButton_DEBUG_2, false);
     setButtonColor(ui->pushButton_DEBUG_3, true);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), datas.size());
 }
-
 
 void Switch_Board::on_pushButton_DEBUG_NONE_clicked()
 {
-    QString s = "C1 00";
-    QByteArray datas = QByteArray::fromHex(s.toUtf8());
+    QByteArray datas = QByteArray::fromHex("C1 00");
 
     setButtonColor(ui->pushButton_DEBUG_0, false);
     setButtonColor(ui->pushButton_DEBUG_1, false);
     setButtonColor(ui->pushButton_DEBUG_2, false);
     setButtonColor(ui->pushButton_DEBUG_3, false);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), datas.size());
 }
-
 
 void Switch_Board::on_pushButton_POWER_ON_clicked()
 {
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
+    datas[0] = 0xC0;
+    datas[1] = 0x01;
+    datas[2] = 0xff;
 
-    datas[0] = static_cast<unsigned char>(0xC0);
-    datas[1] = static_cast<unsigned char>(0x01);
-    datas[2] = static_cast<unsigned char>(0xff);
     BTS7008Flag = 0b1111;
 
     setButtonColor(ui->pushButton_POWER_0, true);
@@ -498,21 +535,16 @@ void Switch_Board::on_pushButton_POWER_ON_clicked()
     setButtonColor(ui->pushButton_POWER_2, true);
     setButtonColor(ui->pushButton_POWER_3, true);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_POWER_OFF_clicked()
 {
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
+    datas[0] = 0xC0;
+    datas[1] = 0x00;
+    datas[2] = 0xff;
 
-    datas[0] = static_cast<unsigned char>(0xC0);
-    datas[1] = static_cast<unsigned char>(0x00);
-    datas[2] = static_cast<unsigned char>(0xff);
     BTS7008Flag = 0;
 
     setButtonColor(ui->pushButton_POWER_0, false);
@@ -520,94 +552,16 @@ void Switch_Board::on_pushButton_POWER_OFF_clicked()
     setButtonColor(ui->pushButton_POWER_2, false);
     setButtonColor(ui->pushButton_POWER_3, false);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
-
-void Switch_Board::tooltipPoint(const QPointF &point)
-{
-    // 显示精确数值（X: 时间, Y: 值）
-    QToolTip::showText(QCursor::pos(), QString("%3 mA").arg(point.y(), 0, 'f', 3), this);
-}
-
-
-void Switch_Board::updateData(double newValue1, double newValue2, double newValue3, double newValue4)
-{
-    qint64 currentTime = elapsedTimer.elapsed();
-
-    // 更新每条曲线的数据
-    dataPointsList[0].append(QPointF(currentTime, newValue1+1.1));
-    dataPointsList[1].append(QPointF(currentTime, newValue2+2.1));
-    dataPointsList[2].append(QPointF(currentTime, newValue3+3.1));
-    dataPointsList[3].append(QPointF(currentTime, newValue4+4.1));
-
-    // 保持最近 5000 个点
-    for (int i = 0; i < 4; i++) {
-        if (dataPointsList[i].size() > 5000) {
-            dataPointsList[i].removeFirst();
-        }
-    }
-
-    // ui->label_4->setText(QString::number(elapsedTimer.elapsed() - elapsedTimerStart) + " ms");
-    elapsedTimerStart = currentTime;
-}
-
-
-void Switch_Board::onTimeChart()
-{
-    // 批量替换数据，避免 clear() 带来的白屏瞬间
-    for (int i = 0; i < 4; i++) {
-        if (dataPointsList[i].size() > 0) {
-            series[i]->replace(dataPointsList[i]);
-        }
-    }
-
-    qint64 time = elapsedTimer.elapsed();
-
-    // 只有当时间轴超出范围时才平滑移动窗口
-    if (time > 20000) {
-        // 使用这种方式会让坐标轴随时间平滑向右平移
-        axisX->setRange(time - 20000, time);
-    }
-
-    // 3. 优化 Y 轴自动缩放逻辑
-    // 只有在必要时才遍历 20000 个点，或者限制遍历频率
-    double minY = 0;
-    double maxY = 200;
-    for (const auto& points : dataPointsList) {
-        if (points.isEmpty()) continue;
-        for (const auto& point : points) {
-            if (point.y() < minY) minY = point.y();
-            if (point.y() > maxY) maxY = point.y();
-        }
-    }
-    double margin = (maxY - minY) * 0.1;
-    axisY->setRange(minY - margin, maxY + margin);
-}
-
-
-void Switch_Board::setButtonColor(QPushButton* btn, bool active) {
-    if (active) {
-        // 绿色代表开启
-        btn->setStyleSheet("background-color: #2ECC71; color: white; border-radius: 4px;");
-    } else {
-        // 灰色代表关闭
-        btn->setStyleSheet("background-color: #BDC3C7; color: black; border-radius: 4px;");
-    }
-}
-
 
 void Switch_Board::on_pushButton_WDG_OFF_clicked()
 {
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
+    datas[0] = 0xC2;
+    datas[1] = 0x00;
+    datas[2] = 0xff;
 
-    datas[0] = static_cast<unsigned char>(0xC2);
-    datas[1] = static_cast<unsigned char>(0x00);
-    datas[2] = static_cast<unsigned char>(0xff);
     HCT4066DFlag = 0;
 
     setButtonColor(ui->pushButton_WDG_0, false);
@@ -615,21 +569,16 @@ void Switch_Board::on_pushButton_WDG_OFF_clicked()
     setButtonColor(ui->pushButton_WDG_2, false);
     setButtonColor(ui->pushButton_WDG_3, false);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_WDG_ON_clicked()
 {
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
+    datas[0] = 0xC2;
+    datas[1] = 0x01;
+    datas[2] = 0xff;
 
-    datas[0] = static_cast<unsigned char>(0xC2);
-    datas[1] = static_cast<unsigned char>(0x01);
-    datas[2] = static_cast<unsigned char>(0xff);
     HCT4066DFlag = 0b1111;
 
     setButtonColor(ui->pushButton_WDG_0, true);
@@ -637,18 +586,13 @@ void Switch_Board::on_pushButton_WDG_ON_clicked()
     setButtonColor(ui->pushButton_WDG_2, true);
     setButtonColor(ui->pushButton_WDG_3, true);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_WDG_0_clicked()
 {
     bool flag;
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
 
     datas[0] = static_cast<unsigned char>(0xC2);
 
@@ -669,18 +613,13 @@ void Switch_Board::on_pushButton_WDG_0_clicked()
 
     setButtonColor(ui->pushButton_WDG_0, flag);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_WDG_1_clicked()
 {
     bool flag;
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
 
     datas[0] = static_cast<unsigned char>(0xC2);
 
@@ -701,18 +640,13 @@ void Switch_Board::on_pushButton_WDG_1_clicked()
 
     setButtonColor(ui->pushButton_WDG_1, flag);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_WDG_2_clicked()
 {
     bool flag;
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
 
     datas[0] = static_cast<unsigned char>(0xC2);
 
@@ -733,18 +667,13 @@ void Switch_Board::on_pushButton_WDG_2_clicked()
 
     setButtonColor(ui->pushButton_WDG_2, flag);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-
 
 void Switch_Board::on_pushButton_WDG_3_clicked()
 {
     bool flag;
-    QByteArray datas;
-    datas.resize(3);
+    QByteArray datas(3, 0);
 
     datas[0] = static_cast<unsigned char>(0xC2);
 
@@ -765,9 +694,5 @@ void Switch_Board::on_pushButton_WDG_3_clicked()
 
     setButtonColor(ui->pushButton_WDG_3, flag);
 
-    int dataLength = datas.length();
-    unsigned char* data = (unsigned char*)datas.data();
-
-    app_libusbTh->libusb_Tx(data, dataLength);
+    app_libusbTh->libusb_Tx(reinterpret_cast<unsigned char*>(datas.data()), 3);
 }
-

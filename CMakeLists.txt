@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 project(Switch_Board_qt LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Charts)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Charts PrintSupport)
 # 查找 PkgConfig 模块
 find_package(PkgConfig REQUIRED)
 
@@ -17,6 +17,7 @@ qt_add_executable(Switch_Board_qt
     switch_board.h
     switch_board.ui
     app_libusb.h app_libusb.cpp
+    qcustomplot.cpp qcustomplot.h
 )
 
 target_link_libraries(Switch_Board_qt
@@ -24,6 +25,7 @@ target_link_libraries(Switch_Board_qt
         Qt::Core
         Qt::Widgets
 	Qt::Charts
+        Qt::PrintSupport
 	${LIBUSB_LIBRARIES}
 )
 

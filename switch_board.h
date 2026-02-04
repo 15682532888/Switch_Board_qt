@@ -10,6 +10,7 @@
 #include <QVector>
 #include <QElapsedTimer>
 #include "app_libusb.h"
+#include "qcustomplot.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class Switch_Board; }
@@ -40,6 +41,7 @@ private slots:
     void on_pushButton_SendCmd_clicked();
 
     void on_pushButton_Find_clicked();
+
     void on_pushButton_POWER_0_clicked();
 
     void on_pushButton_POWER_1_clicked();
@@ -62,8 +64,6 @@ private slots:
 
     void on_pushButton_POWER_OFF_clicked();
 
-    void tooltipPoint(const QPointF &point);  // 工具提示槽
-
     void updateData(double newValue1, double newValue2, double newValue3, double newValue4);
 
     void onTimeChart();
@@ -80,19 +80,21 @@ private slots:
 
     void on_pushButton_WDG_3_clicked();
 
+    void onMouseMoveShowTooltip(QMouseEvent *event);
+
 private:
     Ui::Switch_Board *ui;
     app_libusb* app_libusbTh;
     void setButtonColor(QPushButton* btn, bool active);
 
-    QLineSeries *series[4]; //QLineSeries 更优？
-    QChart *chart;
-    QChartView *chartView;
-    QValueAxis *axisX;
-    QValueAxis *axisY;
-    // QVector<std::pair<double, double>> dataPoints;
-    QVector<QVector<QPointF>> dataPointsList;  // 存储多条曲线的数据
     QElapsedTimer elapsedTimer;
     QTimer *timerChart;
+
+    QCustomPlot *customPlot;
+    QCPGraph *graph[4];
+    QSharedPointer<QCPGraphDataContainer> graphDataContainers[4];
+
+    double minY;
+    double maxY;
 };
 #endif // SWITCH_BOARD_H
