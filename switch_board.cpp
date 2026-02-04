@@ -81,7 +81,7 @@ Switch_Board::Switch_Board(QWidget *parent)
     connect(timerChart, &QTimer::timeout, this, &Switch_Board::onTimeChart);
     timerChart->start();
 
-ui->textEdit->document()->setMaximumBlockCount(50000); // 只保留最近500行数据
+    ui->textEdit->document()->setMaximumBlockCount(5000); // 只保留最近500行数据
 
 
     app_libusbTh = new app_libusb();
@@ -228,7 +228,7 @@ void Switch_Board::onMouseMoveShowTooltip(QMouseEvent *event)
 
     if (!tip.isEmpty())
     {
-        QToolTip::showText(event->globalPos(), tip.trimmed(), this);
+        QToolTip::showText(event->globalPosition().toPoint(), tip.trimmed(), this);
     }
     else
     {
